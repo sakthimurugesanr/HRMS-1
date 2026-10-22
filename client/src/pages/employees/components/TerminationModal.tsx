@@ -1,0 +1,367 @@
+import { useState, useRef, useEffect, ChangeEvent } from "react";
+import { terminateEmployee } from "../../../api/employee.api";
+import { getApiErrorMessage } from "../../../utils/errors";
+import Toast from "../../../utils/toast";
+import {
+  TERMINATION_REASON_OTHER,
+  TERMINATION_REASONS,
+  TERMINATION_TYPES,
+} from "../../../config/constants";
+
+interface TerminationModalProps {
+  employeeId: number;
+  onClose: () => void;
+  onSuccess?: () => void;
+}
+
+export default function TerminationModal({
+  employeeId,
+  onClose,
+  onSuccess,
+}: TerminationModalProps) {
+  const [terminationForm, setTerminationForm] = useState({
+    terminationReason: "",
+    terminationReasonOther: "",
+    terminationDateTime: "",
+    terminationType: "Voluntary",
+    lastWorkingDay: "",
+    noticePeriodDays: "30",
+    rehireEligible: "false",
+    notes: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  type TerminationFormData = typeof terminationForm;
+  const formRef = useRef<TerminationFormData>(terminationForm);
+
+  useEffect(() => {
+    formRef.current = terminationForm;
+  }, [terminationForm]);
+
+  const set =
+    (fieldName: keyof typeof terminationForm) =>
+    (
+      event: ChangeEvent<
+        HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+      >,
+    ) => {
+      const value = event.target.value;
+      formRef.current[fieldName] = value;
+      setTerminationForm((prev) => ({
+        ...prev,
+        [fieldName]: value,
+      }));
+      if (errors[fieldName])
+        setErrors((currentErrors) => {
+          const newErrors = { ...currentErrors };
+          delete newErrors[fieldName];
+          return newErrors;
+        });
+    };
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!terminationForm.terminationReason.trim()) {
+      newErrors.terminationReason = "Termination reason is required";
+    } else if (
+      terminationForm.terminationReason === TERMINATION_REASON_OTHER &&
+      !terminationForm.terminationReasonOther.trim()
+    ) {
+      newErrors.terminationReasonOther =
+        "Please specify the termination reason";
+    }
+
+    if (!terminationForm.terminationDateTime.trim()) {
+      newErrors.terminationDateTime = "Termination date and time is required";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleTerminateSubmit = async () => {
+    if (saving) return;
+
+    if (!validateForm()) return;
+    try {
+      setSaving(true);
+
+      const reason =
+        terminationForm.terminationReason === TERMINATION_REASON_OTHER
+          ? terminationForm.terminationReasonOther.trim()
+          : terminationForm.terminationReason.trim();
+
+      await terminateEmployee(employeeId, {
+        terminationReason: reason,
+        terminationDateTime: terminationForm.terminationDateTime.trim(),
+        terminationType: terminationForm.terminationType,
+        lastWorkingDay:
+          terminationForm.lastWorkingDay.trim() ||
+          terminationForm.terminationDateTime.trim().split("T")[0],
+        noticePeriodDays: parseInt(terminationForm.noticePeriodDays) || 0,
+        exitInterviewCompleted: false,
+        rehireEligible: terminationForm.rehireEligible === "true",
+        notes: terminationForm.notes.trim(),
+      });
+
+      Toast.success("Employee terminated successfully");
+      onClose();
+      if (onSuccess) {
+        onSuccess();
+      }
+    } catch (err: unknown) {
+      Toast.error(getApiErrorMessage(err, "Failed to terminate employee"));
+      setErrors({
+        submit: getApiErrorMessage(err, "Failed to terminate employee."),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTerminateCancel = () => {
+    onClose();
+  };
+
+  const renderDateInput = (
+    name: keyof typeof terminationForm,
+    placeholder = "",
+  ) => (
+    <div>
+      <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+        {name
+          .split(/(?=[A-Z])/)
+          .map((word) => word.toLowerCase())
+          .join(" ")
+          .replace(/^./, (str) => str.toUpperCase())}
+        <span className="text-red-600 ml-0.5">*</span>
+      </label>
+      <input
+        type="datetime-local"
+        placeholder={placeholder}
+        defaultValue={formRef.current[name]}
+        onChange={set(name)}
+        className={`w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors ${
+          errors[name]
+            ? "border-red-500 bg-red-50"
+            : "border-slate-200 bg-slate-50 focus:border-slate-300"
+        }`}
+      />
+      {errors[name] && (
+        <span className="text-xs text-red-600 mt-1 block">{errors[name]}</span>
+      )}
+    </div>
+  );
+
+  const renderTextArea = (
+    name: keyof typeof terminationForm,
+    placeholder = "",
+    req = false,
+  ) => (
+    <div>
+      <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+        {name
+          .split(/(?=[A-Z])/)
+          .map((word) => word.toLowerCase())
+          .join(" ")
+          .replace(/^./, (str) => str.toUpperCase())}
+        {req && <span className="text-red-600 ml-0.5">*</span>}
+      </label>
+
+      <textarea
+        defaultValue={formRef.current[name]}
+        onChange={set(name)}
+        placeholder={placeholder}
+        rows={4}
+        className={`w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors ${
+          errors[name]
+            ? "border-red-500 bg-red-50"
+            : "border-slate-200 bg-slate-50 focus:border-slate-300"
+        }`}
+      />
+      {errors[name] && (
+        <span className="text-xs text-red-600 mt-1 block">{errors[name]}</span>
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-blue-900 to-teal-600">
+          <h2 className="m-0 text-base font-bold text-white">
+            Terminate Employment
+          </h2>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-full bg-white/20 border-0 cursor-pointer text-white text-sm hover:bg-white/30 transition"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">
+          {Object.keys(errors).length > 0 && (
+            <div className="p-2.5 bg-red-50 border-l-4 border-red-300 rounded text-red-800 text-sm mb-4">
+              {errors.submit ||
+                Object.values(errors).map((msg, index) => (
+                  <span key={index}>{msg}</span>
+                ))}
+            </div>
+          )}
+
+          <div className="space-y-6">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+                Termination Reason
+                <span className="text-red-600 ml-0.5">*</span>
+              </label>
+              <select
+                defaultValue={formRef.current.terminationReason}
+                onChange={set("terminationReason")}
+                className={`w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors ${
+                  errors.terminationReason
+                    ? "border-red-500 bg-red-50"
+                    : "border-slate-200 bg-slate-50 focus:border-slate-300"
+                }`}
+              >
+                <option value="">Select a reason</option>
+                {TERMINATION_REASONS.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+              {errors.terminationReason && (
+                <span className="text-xs text-red-600 mt-1 block">
+                  {errors.terminationReason}
+                </span>
+              )}
+              {terminationForm.terminationReason ===
+                TERMINATION_REASON_OTHER && (
+                <div className="mt-2">
+                  <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+                    Please specify reason
+                    <span className="text-red-600 ml-0.5">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    defaultValue={formRef.current.terminationReasonOther}
+                    onChange={set("terminationReasonOther")}
+                    className={`w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors ${
+                      errors.terminationReasonOther
+                        ? "border-red-500 bg-red-50"
+                        : "border-slate-200 bg-slate-50 focus:border-slate-300"
+                    }`}
+                  />
+                  {errors.terminationReasonOther && (
+                    <span className="text-xs text-red-600 mt-1 block">
+                      {errors.terminationReasonOther}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              {renderDateInput("terminationDateTime", "Select date and time")}
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+                Termination Type
+                <span className="text-red-600 ml-0.5">*</span>
+              </label>
+              <select
+                value={terminationForm.terminationType}
+                onChange={set("terminationType")}
+                className="w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors border-slate-200 bg-slate-50 focus:border-slate-300"
+              >
+                {TERMINATION_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+                  Last Working Day
+                </label>
+                <input
+                  type="date"
+                  value={terminationForm.lastWorkingDay}
+                  onChange={set("lastWorkingDay")}
+                  className="w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors border-slate-200 bg-slate-50 focus:border-slate-300"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+                  Notice Period (Days)
+                </label>
+                <input
+                  type="number"
+                  value={terminationForm.noticePeriodDays}
+                  onChange={set("noticePeriodDays")}
+                  min="0"
+                  className="w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors border-slate-200 bg-slate-50 focus:border-slate-300"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1 uppercase tracking-wide">
+                Rehire Eligible
+              </label>
+              <select
+                value={terminationForm.rehireEligible}
+                onChange={set("rehireEligible")}
+                className="w-full px-3 py-2 border-1.5 rounded-lg text-sm outline-none transition-colors border-slate-200 bg-slate-50 focus:border-slate-300"
+              >
+                <option value="false">No</option>
+                <option value="true">Yes</option>
+              </select>
+            </div>
+
+            <div>
+              {renderTextArea(
+                "notes",
+                "Enter additional notes or comments",
+                false,
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between bg-white">
+          <span className="text-xs text-slate-400">
+            <span className="text-red-600">*</span> Required fields
+          </span>
+          <div className="flex gap-2.5">
+            <button
+              onClick={handleTerminateCancel}
+              className="px-5 py-2 rounded-full border border-slate-200 bg-white text-sm font-semibold cursor-pointer text-slate-600 hover:bg-slate-50 transition"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleTerminateSubmit}
+              disabled={saving}
+              className={`px-7 py-2 rounded-full border-0 bg-gradient-to-r from-blue-900 to-teal-600 text-white text-sm font-bold cursor-pointer hover:shadow-lg transition ${saving ? "opacity-65 cursor-not-allowed" : ""}`}
+            >
+              {saving ? "Terminating..." : "Terminate Employment"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
